@@ -94,6 +94,7 @@ def get_asg_details_from_region(region):
 def get_rds_details_from_region(region):
     rds_client = boto3.client('rds', region_name=region)
     rds_list = []
+    cluster_list = []
     try:
         rds_resources = rds_client.describe_db_instances()
         for rds in rds_resources['DBInstances']:
@@ -120,16 +121,39 @@ def get_rds_details_from_region(region):
                 "VPCId": vpc_id            
                 }            
             rds_list.append(rds_asset)
+        clusters = rds_client.describe_db_clusters()
+        for cluster in clusters['DBClusters']:
+            cluster_id = cluster.get('DBClusterIdentifier', "N/A")
+            cluster_status = cluster.get('Status', "N/A")
+            cluster_engine = cluster.get('Engine', 'N/A')
+            cluster_engine_version = cluster.get('EngineVersion', "N/A")
+            cluster_endpoint = cluster.get('Endpoint', "N/A")
+            cluster_reader_endpoint = cluster.get('ReaderEndpoint', "N/A")
+            cluster_vpc_id = cluster.get('VpcId', "N/A")
+            cluster_availability_zones = cluster.get('AvailabilityZones', [])
+
+            cluster_asset = {
+                "DBClusterIdentifier": cluster_id,
+                "Status": cluster_status,
+                "Engine": cluster_engine,
+                "EngineVersion": cluster_engine_version,
+                "Endpoint": cluster_endpoint,  # Primary endpoint (Writer)
+                "ReaderEndpoint": cluster_reader_endpoint,  # Read-only endpoint
+                "VPCId": cluster_vpc_id,
+                "AvailabilityZones": cluster_availability_zones
+            }
+            cluster_list.append(cluster_asset)
 
     except Exception as e:
         print(f"An error occurred in region {region}: {e}")
     
-    return rds_list
+    return rds_list, cluster_list
 
 def main():
     all_ec2_details = []
     all_asg_details = []
     all_rds_details = []
+    all_rds_clusters = []
 
     regions = get_all_regions()
 
@@ -143,13 +167,15 @@ def main():
         all_asg_details.extend(region_asg_details)
 
         print(f"Searching RDS data for region: {region}")
-        region_rds_details = get_rds_details_from_region(region)
+        region_rds_details, region_cluster_details  = get_rds_details_from_region(region)
         all_rds_details.extend(region_rds_details)
+        all_rds_clusters.extend(region_cluster_details)
 
-    return all_ec2_details, all_asg_details, all_rds_details
+    
+    return all_ec2_details, all_asg_details, all_rds_details, all_rds_clusters
 
 # Call the main function and store the results
-ec2_details, asg_details, rds_details = main()
+ec2_details, asg_details, rds_details, rds_clusters   = main()
 
 # Convert to DataFrame and save to Excel
 try:
@@ -165,7 +191,11 @@ try:
         # Save RDS details
         df_rds = pd.DataFrame(rds_details)
         df_rds.to_excel(writer, sheet_name="RDS_Details", index=False)
+
+        # Save RDS_Cluster details
+        df_rds = pd.DataFrame(rds_clusters)
+        df_rds.to_excel(writer, sheet_name="RDS_Cluster_Details", index=False)
         
-    print("Data successfully saved to 'data.xlsx'")
+    print("Aws Inventory report has been generated and saved into 'data.xlsx'")
 except Exception as e:
     print(f"An error occurred while saving the file: {e}")
